@@ -1,0 +1,74 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        expr: [enabled, disabled]
+        link: [static, dynamic]
+        probe: [enabled, disabled]
+    steps:
+      - name: Check out module
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check out nginx-ext
+        uses: actions/checkout@v6
+        with:
+          repository: HanadaLee/nginx-ext
+          ref: '1.31.7'
+          path: .ci/nginx
+          persist-credentials: false
+
+      - name: Check out ngx_expr_module
+        if: matrix.expr == 'enabled'
+        uses: actions/checkout@v6
+        with:
+          repository: HanadaLee/ngx_expr_module
+          ref: '1.0.0'
+          path: .ci/ngx_expr_module
+          persist-credentials: false
+
+      - name: Check out nginx-tests
+        uses: actions/checkout@v6
+        with:
+          repository: nginx/nginx-tests
+          path: .ci/nginx-tests
+          persist-credentials: false
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libpcre2-dev libssl-dev zlib1g-dev perl
+
+      - name: Build and test
+        env:
+          TEST_EXPR: ${{ matrix.expr }}
+          TEST_LINK: ${{ matrix.link }}
+          TEST_PROBE: ${{ matrix.probe }}
+        run: bash util/run-tests.sh
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-${{ matrix.expr }}-${{ matrix.link }}-${{ matrix.probe }}
+          path: .ci/test-output/
+          if-no-files-found: ignore
